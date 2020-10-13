@@ -1,0 +1,692 @@
+<html>
+<head>
+<title>MovIe</title>
+</head>
+<style>
+<!--
+Just some basic css to keep things clear and easy to use.
+-->
+#topMenu ul {
+	list-style-type: none;
+	margin: 0;
+	padding: 0;
+}
+
+#topMenu li {
+	display: inline;
+ 	padding: 5px;
+}
+
+#topMenu li a {
+	text-decoration: none;
+}
+
+#pagination ul {
+	list-style-type: none;
+	margin: 0;
+	padding: 0;
+}
+
+#pagination li {
+	display: inline;
+ 	padding: 5px;
+}
+
+#pagination li a {
+	text-decoration: none;
+}
+
+#search {
+    width: 450px;
+	height: 35px;
+	background-color: rgb(226, 226, 226);
+	padding: 0px 5px 0px 10px;
+} 
+
+#mybutton {
+	height: 35px;
+	width: 50px;
+	background-color: rgb(72, 133, 237)
+}
+
+.round {
+    border-radius: 15px;
+    border: 0px;
+}
+
+.moviestable {
+	width: 950px;
+}
+</style>
+<body>
+<center>
+<br />
+<a href=""><img src="MoovIe.png" /></a>
+<div id="topMenu">
+	<ul>
+		<li><a href="#" onclick="cleanSearch()">Home</a></li>
+		<li><a href="#" onclick="printUserRates()">Rated by me</a></li>
+		<li><a href="#" onclick="userRatedMovies()">Get recommendations</a></li>
+	</ul>
+</div>
+<br />
+<div id="searchTab">
+	<input type="text" id="search" class="round" autocomplete="off"/>
+	<input type="button" id="mybutton" class="round" value="Go"/>
+</div>
+<br />
+<!--
+Multiple divs exist inside the body to print the corresponding information.
+By clicking the menu, the diplay property of each div is changed accordingly to show the correct information. 
+-->
+<div id="content">
+</div>
+<div id="userRates">
+</div>
+<div id="userRecommendations">
+</div>
+<div id="loader">
+</div>
+</center>
+</body>
+<script type="text/javascript">
+// Four request functions for each type of information needed
+// Some carry some extra arguments to allow counting of the requests and pass data to continue execution
+
+// For the getMovies, if a flag is detected it means that we make an OR search.
+// From the mainFunction we send a requesrt with only the first word from the user input, a null keyCode value as a security by obscurity measure
+// to pass keystrokes checks that exist at the begining of the mainFunction, a flag to change what we do when a response is received
+// and the original user input. The reponse is sent back to the mainFunction for further manipulation   
+function getMovies (userInput, callback, keyCode, flag, passInput){
+//	const url = 'http://62.217.127.19:8010/movie';
+	const url = 'http://itp17503.ddns.net:8010/movie';
+	let xhr = new XMLHttpRequest();
+	xhr.open('POST',url,true);
+	xhr.setRequestHeader("Content-Type", "application/json");
+	const requestBody = {'keyword':userInput};
+	xhr.send(JSON.stringify(requestBody));
+	xhr.onreadystatechange = function(){
+		if (xhr.readyState == 4){
+			if (xhr.status == 200){
+				if (flag !== ''){
+					callback.apply(xhr,[keyCode,flag,passInput]);
+				} else {
+					callback.apply(xhr);
+				}
+			}
+		}
+	}
+};
+
+function getRatings (movieArray, callback){
+//	const url = 'http://62.217.127.19:8010/ratings';
+	const url = 'http://itp17503.ddns.net:8010/ratings';
+	let xhr = new XMLHttpRequest();
+	xhr.open('POST',url,true);
+	xhr.setRequestHeader("Content-Type", "application/json");
+	const requestBody = {'movieList':[movieArray]};
+	xhr.send(JSON.stringify(requestBody));
+	xhr.onreadystatechange = function(){
+		if (xhr.readyState == 4){
+			if (xhr.status == 200){
+				callback.apply(xhr);
+			}
+		}
+	}
+};
+
+// Here we use the flag to inform the callback function and make the corresponding processing
+function getMovie(movieID, callback, flag) {
+//	const url = 'http://62.217.127.19:8010/movie/'+movieID;
+	const url = 'http://itp17503.ddns.net:8010/movie/'+movieID;
+	let xhr = new XMLHttpRequest();
+	xhr.open('GET',url,true);
+	xhr.send();
+	xhr.onreadystatechange = function(){
+		if (xhr.readyState == 4){
+			if (xhr.status == 200) {
+				callback.apply(xhr,[flag]);
+			}
+		}
+	}
+};
+
+// Again if we get a flag pass it back to the callback function to allow further processing
+function getUserRating(userId, callback, flag) {
+//	const url = 'http://62.217.127.19:8010/ratings/'+userId;
+	const url = 'http://itp17503.ddns.net:8010/ratings/'+userId;
+	let xhr = new XMLHttpRequest();
+	xhr.open('GET',url,true);
+	xhr.send();
+	xhr.onreadystatechange = function(){
+		if (xhr.readyState == 4){
+			if (xhr.status == 200) {
+				if (flag !== '') {
+					callback.apply(xhr,[flag]);
+				} else {
+					callback.apply(xhr);
+				}
+			};
+		};
+	};
+};
+// A function to build the search results table and print it
+// Special flags to allow adding movies from the table or when an OR search is used
+// Two notes for this function 
+// 1) we use base64 encoding to allow to pass all the movie data to addUserRate function which adds the movie to the list of the user
+// 2) we use the buildRates function to make the select element because we cross check if the movie is added in the user list and print its rate
+function printMovies (flag) {
+	searchData = this;
+	perpage = 20;
+	if ((flag == null) || (flag == 'localSearch')) {
+		page = 0;
+	}
+	let divElem = document.getElementById('content');
+	const result = JSON.parse(this.responseText);
+	if (result.length != 0) {
+		let movieIds = [];
+		for (var i in result) {
+			movieIds.push('<tr class="result" id="'+i+'"><td>'+(Number(i)+Number(1))+'</td><td class="title">'+result[i].title+'</a></td><td class="genres">'+result[i].genres.replace(/\|/g,", ")+'</td><td class="rate"><select name="rates" onchange="addUserRate(\''+btoa(result[i].movieId+'-'+unescape(encodeURIComponent(result[i].title))+'-'+result[i].genres)+'\',this.value)">'+buildRates(getUserRate(result[i].movieId))+'</select></td></tr>');
+			i++;
+		}
+		const data = movieIds;
+		objJson = data;
+		divElem.innerHTML = '';
+		divElem.innerHTML += '<br /><div id="pagination"><ul>\
+								<li><a href="#" onclick="classPagination(\'result\','+perpage+',\'previous\',\'mov\')" id="btn_prev_mov">Previous Page</a></li>\
+								<li><a href="#" onclick="classPagination(\'result\','+perpage+',\'next\',\'mov\')" id="btn_next_mov">Next Page</a></li>\
+							 </ul></div><br />';
+		divElem.innerHTML += '<table class="moviestable">\
+								<thead><tr><td>#</td><td>Title</td><td>Genres</td><td>Rate</td></tr></thead>\
+								<tfoot></tfoot><tbody>'+data.join('')+'</tbody></table>';
+
+		if (flag == 'movieadded') {
+			classPagination('result',perpage,'stay','mov');
+		} else {
+			classPagination('result',perpage,'next','mov');
+		}
+
+		if (flag == null) {
+			printSearchTab();
+		}
+	} else {
+		let divElem = document.getElementById('content');
+		divElem.innerHTML = '<br /><h1>No results!</h1><br />Looking for a movie? Please double-check the spelling!';
+	}
+};
+
+// A function for the home option in the menu that clears previous data stored in document variables 
+function cleanSearch (){
+
+	searchData = '';
+	document.getElementById('content').innerHTML = '';
+	document.getElementById("search").value = "";
+	page = 0;
+
+	document.getElementById("searchTab").style.display = "initial";
+	document.getElementById("content").style.display = "initial";
+	document.getElementById("userRates").style.display = "none";
+	document.getElementById("userRecommendations").style.display = "none";
+	document.getElementById("loader").style.display = "none";
+
+};
+
+// Same as the previous function but doesn't erase previous data
+function printSearchTab () {
+	document.getElementById("searchTab").style.display = "initial";
+	document.getElementById("content").style.display = "initial";
+	document.getElementById("userRates").style.display = "none";
+	document.getElementById("userRecommendations").style.display = "none";
+	document.getElementById("loader").style.display = "none";
+};
+
+// A function to build the user rated movies table and print it 
+function printUserRates () {
+
+	searchData = '';
+	document.getElementById('content').innerHTML = '';
+	document.getElementById("search").value = "";
+	page = 0;
+	perpage = 10;
+
+	document.getElementById("searchTab").style.display = "initial";
+	document.getElementById("content").style.display = "none";
+	document.getElementById("userRates").style.display = "initial";
+	document.getElementById("userRecommendations").style.display = "none";
+	document.getElementById("loader").style.display = "none";
+	
+	let divElem = document.getElementById('userRates');
+	
+	if (userRatings.length > 0) {
+	let userRates = [];
+	for (var i in userRatings) {
+		result = userRatings[i];
+		setDate = new Date(result.timestamp);
+		setDate = setDate.toDateString()+' '+setDate.getHours()+':'+setDate.getMinutes()+':'+setDate.getSeconds();
+		userRates.push('<tr class="rateResult" id="'+i+'"><td>'+(Number(i)+Number(1))+'</td><td class="title">'+result.title+'</td><td>'+result.genres.replace(/\|/g,", ")+'</td><td><select name="rates" onchange="addUserRate(\''+btoa(result.movieId+'-'+unescape(encodeURIComponent(result.title))+'-'+result.genres)+'\',this.value,\'fromRated\')">'+buildRates(getUserRate(result.movieId))+'</select></td><td>'+setDate+'</td></tr>');
+		i++;
+	}
+	const data = userRates;
+	divElem.innerHTML = '';
+	divElem.innerHTML += '<br /><div id="pagination"><ul>\
+								<li><a href="#" onclick="classPagination(\'rateResult\','+perpage+',\'previous\',\'rt\')" id="btn_prev_rt">Previous Page</a></li>\
+								<li><a href="#" onclick="classPagination(\'rateResult\','+perpage+',\'next\',\'rt\')" id="btn_next_rt">Next Page</a></li>\
+							 </ul></div><br />';
+	divElem.innerHTML += '<table class="moviestable"><tr><td>#</td><td>Title</td><td>Genres</td><td>Rate</td><td>Date Rated</td></tr>'+data.join('')+'</table>';
+	classPagination('rateResult',perpage,'next','rt');
+	} else {
+		divElem.innerHTML = '';
+	}
+};
+
+// A function to build the user recommendations table and print it
+// Just a notes, we use flags to return from each request to this function to keep things clean and not have many functions doing each step needed 
+function printUserRecommendations (flag, counter) {
+
+	searchData = '';
+	document.getElementById('content').innerHTML = '';
+	document.getElementById("search").value = "";
+	page = 0;
+	perpage = 10;	
+
+	if (flag == null) {	
+		similarUser = similar_user(JSON.parse(dataset),'browserUser',1,pearsonCorrelation);
+		getUserRating(similarUser[0].p,printUserRecommendations,"firstpass")
+	} else if (flag == "firstpass") {
+		userMovies = JSON.parse(this.responseText);
+		recommendedMovies = [];
+		for (var i in userMovies) {
+			if ((userMovies[i].rating == 5) && (userRatingsIDs.indexOf(String(userMovies[i].movieId)) == -1)){
+				recommendedMovies.push(userMovies[i].movieId);
+			}
+		i++;
+		}
+		for (var ii in recommendedMovies) {
+			getMovie(recommendedMovies[ii],printUserRecommendations,"2ndpass");
+			ii++;
+		}
+	} else if ((flag == "2ndpass") || (flag == "printAgain")) {
+		if (flag == "2ndpass") {
+			countInserts++;
+			justaMovie = JSON.parse(this.responseText);
+			tableData.push({"movieId":justaMovie[0].movieId,"title":justaMovie[0].title,"genres":justaMovie[0].genres});
+		}
+		if (countInserts == recommendedMovies.length) {
+			if (flag == '2ndpass') {
+				document.getElementById("loader").style.display = "none";
+				document.getElementById("userRecommendations").style.display = "initial";
+			}
+		let divElem = document.getElementById('userRecommendations');
+		var recommendationsTable = '';
+		var entry;
+		page = 0;
+			for (var i=0; i < tableData.length; i++) {
+				entry = tableData[i];
+				recommendationsTable += '<tr class="recommendationResult"><td>'+(Number(i)+Number(1))+'</td><td>'+entry.title+'</td><td>'+entry.genres.replace(/\|/g,", ")+'</td><td class="rate"><select name="rates" onchange="addUserRate(\''+btoa(entry.movieId+'-'+unescape(encodeURIComponent(entry.title))+'-'+entry.genres)+'\',this.value,\'fromRecommendations\')">'+buildRates(getUserRate(entry.movieId))+'</select></td></tr>'; 
+			}
+		
+		divElem.innerHTML = '';
+		divElem.innerHTML += '<br /><div id="pagination"><ul>\
+								<li><a href="#" onclick="classPagination(\'recommendationResult\','+perpage+',\'previous\',\'rec\')" id="btn_prev_rec">Previous Page</a></li>\
+								<li><a href="#" onclick="classPagination(\'recommendationResult\','+perpage+',\'next\',\'rec\')" id="btn_next_rec">Next Page</a></li>\
+							 </ul></div><br />';
+		divElem.innerHTML += '<table class="moviestable"><tr><td>#</td><td>Title</td><td>Genres</td><td>Rate</td>'+recommendationsTable+'</table>';
+
+		classPagination('recommendationResult',perpage,'next','rec');
+		}
+	}
+};
+
+// The function that it initiates the search for the most compatible user with the browserUser and make suggestions
+// Also prints a message because it takes some time to process everything
+function userRatedMovies () {
+
+	countInserts = '';
+	countResponses = '';
+	datasetUsers = [];
+	dataset = {};
+	var checkMovies = [];
+	likedMovies = [];
+	for (var i in userRatings) {
+		if (userRatings[i].rating == 5 ) {
+			checkMovies[i] = userRatings[i].movieId;
+		}
+	i++;
+	}
+
+	likedMovies = checkMovies;
+	tableData = [];
+	document.getElementById("searchTab").style.display = "initial";
+	document.getElementById("content").style.display = "none";
+	document.getElementById("userRates").style.display = "none";
+	document.getElementById("userRecommendations").style.display = "none";
+	document.getElementById("loader").style.display = "initial";
+	document.getElementById("loader").innerHTML = "<br />Generating recommendations.<br />Please wait!";
+	startDataset ();
+	getRatings(likedMovies,simillarUsers);
+};
+
+// A function to initiate the building of a big object containing each user and the movies that he has rated
+function startDataset () {
+	dataset = '{"browserUser": {';
+	for (var i in userRatings) {
+		dataset += '"'+userRatings[i].movieId+'": '+userRatings[i].rating+', ';
+		i++;
+	}
+	dataset = dataset.slice(0, -2);
+	dataset += '},\r\n';
+}
+
+// A function that we return after we have found which users have seen the same movies with the browserUser
+function simillarUsers () {
+	var users = [];
+	data = JSON.parse(this.responseText);
+	for (var i in data) {
+		if  ((users.indexOf(data[i].userId) == -1) && (data[i].rating == 5)) {
+			users.push('{"userId":'+data[i].userId+'}');
+		}
+	i++;
+	}
+	datasetUsers = users;
+	for (var ii in users){
+		getUserRating(JSON.parse(users[ii]).userId,simillarUsersLists);
+		ii++;
+	}
+}
+
+// A function that we return after requesting
+function simillarUsersLists () {
+
+	countResponses++;
+	data = JSON.parse(this.responseText);
+	document.getElementById("loader").innerHTML = "<br />Generating recommendations. Please wait!<br />Found "+countResponses+" simmilar users";
+
+	for (var i in data) {
+		if (i == 0){ 
+			dataset += '"'+data[i].userId+'": {';
+		}
+		dataset += '"'+data[i].movieId+'": '+data[i].rating+', ';
+		i++;
+	}
+	dataset = dataset.slice(0, -2);
+	dataset += '},\r\n';
+
+	if (countResponses == datasetUsers.length) {
+		dataset = dataset.slice(0, -3);
+		dataset += '}';
+		printUserRecommendations();
+	}
+}
+
+// Pearson correlation related functions
+// These functions are taken from the following url
+// https://becominghuman.ai/introduction-to-recommendation-system-in-javascript-74209c7ff2f7
+var len  = function(obj){
+    var len=0;
+    for(var i in obj){
+        len++
+    }
+    return len;
+}
+
+function pearsonCorrelation(data,p1,p2){
+	var dataset = data;
+	var existp1p2 = {};
+	for(item in dataset[p1]){
+		if(item in dataset[p2]){
+			existp1p2[item] = 1
+		}
+	}
+	var num_existence = len(existp1p2);
+	if(num_existence ==0) return 0;
+	//store the sum and the square sum of both p1 and p2
+	//store the product of both
+	var p1_sum=0,
+	p2_sum=0,
+	p1_sq_sum=0,
+	p2_sq_sum=0,
+	prod_p1p2 = 0;
+	//calculate the sum and square sum of each data point
+	//and also the product of both point
+	for(var item in existp1p2){
+		p1_sum += dataset[p1][item];
+		p2_sum += dataset[p2][item];
+		p1_sq_sum += Math.pow(dataset[p1][item],2);
+		p2_sq_sum += Math.pow(dataset[p2][item],2);
+		prod_p1p2 += dataset[p1][item]*dataset[p2][item];
+	}
+	var numerator =prod_p1p2 - (p1_sum*p2_sum/num_existence);
+	var st1 = p1_sq_sum - Math.pow(p1_sum,2)/num_existence;
+	var st2 = p2_sq_sum -Math.pow(p2_sum,2)/num_existence;
+	var denominator = Math.sqrt(st1*st2);
+	if(denominator ==0) return 0;
+	else {
+		var val = numerator / denominator;
+		return val;
+	}
+}
+
+var similar_user = function(data,person,num_user,distance){
+	var dataset = data;
+	var scores=[];
+	for(var others in dataset){
+		if(others != person && typeof(dataset[others])!="function"){
+			var val = distance(dataset,person,others)
+			var p = others
+			scores.push({val:val,p:p});
+		}
+	}
+	scores.sort(function(a,b){
+		return b.val < a.val ? -1 : b.val > a.val ? 1 : b.val >= a.val ? 0 : NaN;
+	});
+	var score=[];
+	for(var i =0;i<num_user;i++){
+		score.push(scores[i]);
+	}
+	return score;
+}
+// End of pearson correlation related functions
+
+// A function to add a movie to the list. Depending on the flag we change what we print on the screen
+function addUserRate (movie,movieRate,flag) {
+	
+	if (flag == null) {
+		flag = 'movieadded';
+	}
+	
+	blob = movie;
+	movie = atob(movie);
+	movie = movie.split("-");
+	movieId = movie[0];
+	var movieIsRated = 0;
+	for (var i in userRatings) {
+		if (movieId == userRatings[i].movieId) {
+			if (movieRate == 0 ) {
+				userRatings.splice(i,1);
+			} else {
+				userRatings[i].rating = movieRate;
+				userRatings[i].timestamp = Date.now();
+			}
+			movieIsRated = 1;
+		}
+	i++;
+	}
+	if (movieIsRated == 0) {
+		userRatings.push({"movieId":movieId,"title":decodeURIComponent(escape(movie[1])),"genres":movie[2],"rating":movieRate,"timestamp":Date.now()});
+		userRatingsIDs.push(movieId);
+	}
+	
+	if ( flag == 'movieadded') {
+		printMovies.apply(searchData,[flag]);
+	}
+	
+	if ( flag == 'fromRated') {
+		printUserRates();
+	}
+}
+
+// A function that return the rate of a movie from the browserUser's list
+function getUserRate (movieId) {
+	var movieRate = 0;
+	for (var i in userRatings) {
+		if (movieId == userRatings[i].movieId) {
+			movieRate = userRatings[i].rating;
+		}
+	i++;
+	}
+	return movieRate;
+}
+
+// A function to build a select element to be used when printing to screen
+function buildRates (rateValue) {
+	var options;
+	var i = 0;
+	while (i < 6) {
+		options += '<option value="'+i+'"';
+		if (i == rateValue) {
+			options += ' selected';
+		}
+		if (i == 0) { 
+			options += '>Not rated'; 
+		} else {
+			options	+= '>'+i; 
+		};
+		options += '</option>';
+		i++;
+	}
+	return options;
+}
+
+// A function that receives the user input and initiates the search process
+// Special note, we check for "" or '' at the beginning and the end of the input
+// If these characters are detected the input is feeded to the request as a whole phrase and not as an array
+// This way the user can search exaclty the title of the movie
+// Else an OR search is initiated, we use the first word to initiate the request
+// When a response is received it passed through the initial checks and we check the rest of the words against a copy of the data received on the first request
+// This way in each step we filter out each word to find the results that come close to what the users searches
+// Finally we filter out any symbols from the input not to mess our request
+function mainFunction (keyPressed,flag,passInput){
+		
+	var skipCheck = 0;
+		
+	if ((keyPressed == null) && (flag == 'orSearch') && (passInput !== '')){
+		skipCheck = 1;
+		searchData = this;
+	}
+	
+	if (skipCheck == 0) {
+		if ((keyPressed.keyCode == 8) || (keyPressed.keyCode == 46)) {
+			searchData = '';
+		}
+	}
+	
+	if ((skipCheck == 1) || (keyPressed.keyCode == 13) || (keyPressed.button == 0)) {
+		if (skipCheck == 0) {
+			var userInput = document.getElementById('search').value.trim();
+			if (userInput !== '') {
+				if (((userInput.charAt(0) == '\'') && (userInput.charAt(userInput.length-1) == '\'')) || ((userInput.charAt(0) == '"') && (userInput.charAt(userInput.length-1) == '"'))) {
+					userInput = userInput.slice(1,-1);
+					userInput = userInput.trim();
+					userInput = userInput.replace(/[&\/\\#,+()$~%."*?<>{}]/g, '');
+					var specifiedInput = 1;
+				} else {
+					userInput = userInput.replace(/[&\/\\#,+()$~%."*?<>{}]/g, '');
+					userInput = userInput.split(" ");
+				}
+			} else {
+				userInput = '';
+			}
+		} else {
+			userInput = passInput;
+		}
+		printSearchTab();
+		if ((userInput.length == 1) || (specifiedInput == 1)) {
+			getMovies(userInput,printMovies);
+		} else if (userInput.length > 1) {
+			if ((searchData !== '') && (flag == 'orSearch')) {
+				var parsedData = JSON.parse(searchData.responseText);
+				for (var i=1; i < userInput.length; i++){
+					if (matchedData != null) {
+						parsedData = matchedData;
+					}
+					var matchedData = [];
+					for (var ii=0; ii < parsedData.length; ii++){
+						title = parsedData[ii].title;
+						var matchThis = new RegExp(userInput[i], 'gi');
+						if (title.match(matchThis) != null){
+							matchedData.push(parsedData[ii]); 
+						}
+					}
+				}
+			printMovies.apply({responseText:JSON.stringify(matchedData)},['localSearch']);
+			} else {
+				getMovies(userInput[0],mainFunction,null,'orSearch',userInput);
+			}
+		}
+	} 
+};
+
+// A function used for pagination based on class element
+// This way we collapse all table rows that must not be shown in the specific page
+function classPagination(cls,perpage,flag,suffix) {
+
+	var btn_next = document.getElementById('btn_next_'+suffix);
+    var btn_prev = document.getElementById('btn_prev_'+suffix);
+	var list = document.getElementsByClassName(cls);
+	
+	if (flag != 'stay') {
+		if ((flag == 'previous') && (page > 1)) {
+			page--;
+		} else 	if  ((flag == 'next') && (page < Math.ceil(list.length / perpage))) {
+			page++;
+		}
+	}
+	
+	if (page < 2) {
+		btn_prev.style.visibility = "hidden";
+    } else {
+        btn_prev.style.visibility = "visible";
+    }
+
+    for(var i = 0; i < list.length; ++i) {
+		list[i].style.visibility = 'collapse';
+    }
+	
+	for(var ii = (page-1)*perpage; ii < (page * perpage); ++ii) {
+		if (list[ii] != null) {
+			list[ii].style.visibility = 'visible';
+		}
+    }
+
+    if (page == Math.ceil(list.length / perpage)) {
+        btn_next.style.visibility = "hidden";
+    } else {
+        btn_next.style.visibility = "visible";
+    }
+}
+
+
+
+// Pagination variable
+var page = 0;
+
+// Used variables
+var searchData;
+var userRatings = [];
+var likedMovies = [];
+var userRatingsIDs = [];
+var userRecommendations = {};
+var datasetUsers = [];
+var countResponses = '';
+var countInserts = '';
+var dataset = {};
+var moviesDetails = [];
+var tableData = [];
+var processedUserRatings = '';
+
+// Detect typing or click of button
+document.getElementById("loader").style.display = "none";
+document.getElementById('mybutton').addEventListener('click',mainFunction);
+document.getElementById('search').addEventListener('keyup',mainFunction);
+</script>
+</html>
